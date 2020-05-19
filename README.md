@@ -22,7 +22,7 @@
 
 * ### Agent id
 
-    Agent ID is an unique idenfitication for each task agent.
+    Agent ID is an idenfitication for each task agent.
 
 * ### Task request Topic
 
@@ -34,7 +34,7 @@
 
 * ### Parallel
 
-    The parallel parameter is used to control how many tasks could be handled simultaneously. The upper boud is the number of cpus, the lower bound is 1. If parallel is set to 1, then only one task could be handle at a time, if the previous task not done, the succceeding task will be block until the previous one finished.
+    The parallel parameter is used to control how many tasks could be handled simultaneously. The upper boud is the number of cpus, the lower bound is 1. If parallel is set to 1, then only one task could be handled at a time, if the previous task not done, the succceeding task will be block until the previous one finished.
 
 * ### Task timeout
   
