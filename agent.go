@@ -3,11 +3,11 @@ package goagent
 import (
 	"context"
 	"errors"
-	"log"
 	"runtime"
 	"runtime/debug"
 	"time"
 
+	"github.com/enix223/goagent/logger"
 	"github.com/google/uuid"
 )
 
@@ -55,10 +55,16 @@ func NewAgent(opts ...Option) *Agent {
 		panic("ParseRequestFunc not set")
 	}
 
-	a.tokens = make(chan struct{}, maxParallel)
-	for i := 0; i < maxParallel; i++ {
+	a.tokens = make(chan struct{}, a.opts.Parallel)
+	for i := 0; i < a.opts.Parallel; i++ {
 		// fill channel with tokens
 		a.tokens <- struct{}{}
+	}
+
+	if a.opts.Logger == nil {
+		a.opts.Logger = logger.NewLogger(
+			logger.SetLevel(logger.INFO),
+		)
 	}
 
 	return a
@@ -87,7 +93,8 @@ func (a *Agent) Stop() {
 }
 
 func (a *Agent) handleRequest(request Request) {
-	log.Println("Start handling reqeust: ", request)
+	a.opts.Logger.Infof("Got reqeust: %s", request.GetID())
+	a.opts.Logger.Debugf("Accquiring token...")
 
 	// accquire token before action
 	select {
@@ -99,16 +106,21 @@ func (a *Agent) handleRequest(request Request) {
 		return
 	}
 
+	a.opts.Logger.Debugf("Token accquired")
+
 	ctx, cancel := context.WithTimeout(context.Background(), a.opts.TaskTimeout)
 
 	// prevent crash
 	defer func() {
+		a.opts.Logger.Debugf("Token released")
+
 		// release token after task done
 		a.tokens <- struct{}{}
 
 		cancel()
 
 		if err := recover(); err != nil {
+			a.opts.Logger.Errorf("Error occurred")
 			debug.PrintStack()
 		}
 	}()
@@ -117,12 +129,15 @@ func (a *Agent) handleRequest(request Request) {
 	select {
 	case response := <-responseChannel:
 		// task request arrived
+		a.opts.Logger.Debugf("Got task handler response, send result notification")
 		a.opts.Broker.NotifyResult(a.opts.TaskResultTopic, request.GetID(), response)
 	case <-a.closeCh:
 		// agent stop
+		a.opts.Logger.Infof("Agent stop")
 		return
 	case <-ctx.Done():
 		// task timeout
+		a.opts.Logger.Errorf("Task handle timeout. Send error notification")
 		response := Response{
 			RequestID: request.GetID(),
 			Success:   false,

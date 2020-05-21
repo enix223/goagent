@@ -2,9 +2,9 @@ package redis
 
 import (
 	"encoding/json"
-	"log"
 
 	"github.com/enix223/goagent"
+	"github.com/enix223/goagent/logger"
 	"github.com/go-redis/redis/v7"
 )
 
@@ -13,6 +13,7 @@ type Broker struct {
 	url              string
 	client           *redis.Client
 	done             <-chan struct{}
+	logger           goagent.Logger
 	requestChannel   chan goagent.Request
 	parseRequestFunc goagent.ParseRequestFunc
 }
@@ -31,6 +32,12 @@ func NewBroker(opts ...Option) *Broker {
 	}
 	b.client = redis.NewClient(uri)
 
+	if b.logger == nil {
+		b.logger = logger.NewLogger(
+			logger.SetLevel(logger.INFO),
+		)
+	}
+
 	return b
 }
 
@@ -42,7 +49,7 @@ func (b *Broker) Subscribe(agentID, requestTopic string, done <-chan struct{}, f
 	b.requestChannel = make(chan goagent.Request, 0)
 	b.done = done
 
-	log.Printf("Waiting for task in topic: %s...", requestTopic)
+	b.logger.Infof("Waiting for task in topic: %s...", requestTopic)
 	go func() {
 		for {
 			select {
@@ -50,14 +57,16 @@ func (b *Broker) Subscribe(agentID, requestTopic string, done <-chan struct{}, f
 				// finished and close
 				close(b.requestChannel)
 				pubsub.Close()
+				b.logger.Infof("Broker closed")
 				return
 			case msg, ok := <-pubsub.Channel():
 				if ok {
+					b.logger.Debugf("Got message: %s", msg.Payload)
 					if request, err := fn([]byte(msg.Payload)); err == nil {
 						b.requestChannel <- request
 					} else {
 						// failed to parse request
-						log.Printf("Failed to parse request: %v", err)
+						b.logger.Errorf("Failed to parse request: %v", err)
 					}
 				}
 			}

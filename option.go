@@ -27,6 +27,7 @@ type Options struct {
 	HandleFunc       MessageHandleFunc
 	ParseRequestFunc ParseRequestFunc
 	TaskTimeout      time.Duration
+	Logger           Logger
 }
 
 // Option config option
@@ -88,5 +89,12 @@ func SetTaskTimeout(t time.Duration) Option {
 func SetParseRequestFunc(fn ParseRequestFunc) Option {
 	return func(o *Options) {
 		o.ParseRequestFunc = fn
+	}
+}
+
+// SetLogger set agent logger
+func SetLogger(l Logger) Option {
+	return func(o *Options) {
+		o.Logger = l
 	}
 }

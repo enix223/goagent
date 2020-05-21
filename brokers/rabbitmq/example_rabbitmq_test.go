@@ -31,6 +31,7 @@ func parseRequestFunc(body []byte) (goagent.Request, error) {
 }
 
 func handleTask(ctx context.Context, request goagent.Request) <-chan goagent.Response {
+	log.Printf("Got task: %s", request.GetID())
 	res := make(chan goagent.Response, 0)
 
 	go func() {

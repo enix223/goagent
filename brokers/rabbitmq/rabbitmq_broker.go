@@ -2,11 +2,11 @@ package rabbitmq
 
 import (
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/enix223/goagent"
 	"github.com/enix223/goagent/brokers/utils"
+	"github.com/enix223/goagent/logger"
 	"github.com/streadway/amqp"
 )
 
@@ -22,6 +22,7 @@ type Broker struct {
 	topic            string
 	url              string
 	exchange         string
+	logger           goagent.Logger
 	conn             *amqp.Connection
 	channel          *amqp.Channel
 	channelClosed    chan *amqp.Error
@@ -38,6 +39,12 @@ func NewBroker(opts ...Option) *Broker {
 
 	for _, o := range opts {
 		o(a)
+	}
+
+	if a.logger == nil {
+		a.logger = logger.NewLogger(
+			logger.SetLevel(logger.INFO),
+		)
 	}
 
 	return a
@@ -58,11 +65,11 @@ func (a *Broker) Subscribe(agentID, taskTopic string, done <-chan struct{}, fn g
 			select {
 			case <-a.done:
 				// close the connection
-				log.Println("Stopping client")
+				a.logger.Infof("Stopping client...")
 				a.close()
 				return
 			case err := <-a.channelClosed:
-				log.Printf("channel closed: %v", err)
+				a.logger.Errorf("channel closed: %v", err)
 				a.run()
 			}
 		}
@@ -98,8 +105,10 @@ func (a *Broker) NotifyResult(resultTopic string, requestID string, result goage
 
 func (a *Broker) subscribe() {
 	topic := a.topic
+	a.logger.Debugf("Try to subscribe topic: %s", topic)
+
 	utils.WaitUntil(a.done, func() bool {
-		log.Printf("Try to subscribe topic: %s", topic)
+		a.logger.Debugf("Declaring queue %s...", a.queueName)
 		_, err := a.channel.QueueDeclare(
 			a.queueName, // queue name
 			true,        // durable
@@ -109,15 +118,16 @@ func (a *Broker) subscribe() {
 			nil,         // agrs
 		)
 		if err != nil {
-			log.Printf("failed declare queue: %v, will try to reconnect after %d seconds...", err, reconnectInterval)
+			a.logger.Errorf("failed declare queue: %v, will try to reconnect after %d seconds...", err, reconnectInterval)
 			time.Sleep(reconnectInterval * time.Second)
 			return false
 		}
-		log.Printf("Subscribe success")
+		a.logger.Debugf("Queue declared")
 		return true
 	})
 
 	utils.WaitUntil(a.done, func() bool {
+		a.logger.Debugf("Binding queue: %s, topic: %s, exchange: %s...", a.queueName, topic, a.exchange)
 		err := a.channel.QueueBind(
 			a.queueName, // queue name
 			topic,       // topic
@@ -126,11 +136,11 @@ func (a *Broker) subscribe() {
 			nil,
 		)
 		if err != nil {
-			log.Printf("failed to bind queue: %v, will try to reconnect after %d seconds...", err, reconnectInterval)
+			a.logger.Errorf("failed to bind queue: %v, will try to reconnect after %d seconds...", err, reconnectInterval)
 			time.Sleep(reconnectInterval * time.Second)
 			return false
 		}
-		log.Printf("Queue binded")
+		a.logger.Debugf("Queue binded")
 		return true
 	})
 
@@ -147,33 +157,33 @@ func (a *Broker) subscribe() {
 			nil,         // args
 		)
 		if err != nil {
-			log.Printf("failed to consume msg: %v, will try after %d seconds...", err, reconnectInterval)
+			a.logger.Errorf("failed to consume msg: %v, will try after %d seconds...", err, reconnectInterval)
 			time.Sleep(reconnectInterval * time.Second)
 			return false
 		}
 		return true
 	})
 
-	log.Println("message subscribed")
+	a.logger.Infof("message subscribed")
 
 	for {
 		select {
 		case msg, ok := <-msgs:
 			if ok {
 				if req, err := a.parseRequestFunc(msg.Body); err == nil {
-					log.Printf("Got task request: %s", string(msg.Body))
+					a.logger.Debugf("Got task request: %s", string(msg.Body))
 					a.requestChannel <- req
 				} else {
-					log.Printf("Failed to parse request: %v", err)
+					a.logger.Errorf("Failed to parse request: %v", err)
 				}
 			}
 		case <-a.channelClosed:
-			log.Println("message handler exit coz channel closed")
+			a.logger.Errorf("message handler exit coz channel closed")
 			return
 		case <-a.done:
 			a.channel.QueueUnbind(a.queueName, topic, a.exchange, nil)
 			a.channel.QueueDelete(a.queueName, false, false, false)
-			log.Printf("clear subscription")
+			a.logger.Infof("clear subscription")
 			return
 		}
 	}
@@ -182,10 +192,10 @@ func (a *Broker) subscribe() {
 // Connect create connection
 func (a *Broker) connect() {
 	utils.WaitUntil(a.done, func() bool {
-		log.Printf("Try to connect MQ: %s", a.url)
+		a.logger.Infof("Try to connect MQ: %s", a.url)
 		conn, err := amqp.Dial(a.url)
 		if err != nil {
-			log.Printf("failed to connect MQ: %v, will try after %d seconds...", err, reconnectInterval)
+			a.logger.Errorf("failed to connect MQ: %v, will try after %d seconds...", err, reconnectInterval)
 			time.Sleep(reconnectInterval * time.Second)
 			return false
 		}
@@ -194,10 +204,10 @@ func (a *Broker) connect() {
 	})
 
 	utils.WaitUntil(a.done, func() bool {
-		log.Printf("Creating channel...")
+		a.logger.Debugf("Creating channel...")
 		channel, err := a.conn.Channel()
 		if err != nil {
-			log.Printf("failed to create channel: %v, will try after %d seconds", err, reconnectInterval)
+			a.logger.Errorf("failed to create channel: %v, will try after %d seconds", err, reconnectInterval)
 			time.Sleep(reconnectInterval * time.Second)
 			return false
 		}
@@ -206,12 +216,12 @@ func (a *Broker) connect() {
 	})
 
 	a.channel.NotifyClose(a.channelClosed)
-	log.Printf("create connection success")
+	a.logger.Infof("Connection created")
 }
 
 // Close close connection
 func (a *Broker) close() {
-	log.Print("Closing rabbitmq client")
+	a.logger.Infof("Closing rabbitmq client")
 	close(a.requestChannel)
 
 	if a.channel != nil {
